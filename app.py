@@ -54,36 +54,39 @@ with col_btn:
     if st.button("🔍 Analizar"):
         try:
             with st.spinner(f"Tomando signos vitales de {ticker}..."):
-                # 1. Descargar datos de Yahoo Finance
+                # 1. Descargar datos
                 stock = yf.Ticker(ticker)
-                hist = stock.history(period="1mo") # Historial de 1 mes
+                hist = stock.history(period="1mo")
                 
-                # 2. Obtener Precio Actual
+                # 2. Obtener valores
                 precio_actual = hist['Close'].iloc[-1]
-                
-                # 3. Calcular un Stop Loss Sugerido (Mínimo de 14 días)
-                # Esto automatiza la búsqueda de soporte
                 bajo_14dias = hist['Low'].tail(14).min()
                 
-                # 4. Guardar en memoria
-                st.session_state['entrada'] = float(round(precio_actual, 2))
-                st.session_state['stop_loss'] = float(round(bajo_14dias, 2))
+                # 3. ACTUALIZACIÓN FORZADA DE LOS CAMPOS (EL FIX)
+                # Escribimos directo en la 'key' del widget
+                st.session_state['input_entrada'] = float(round(precio_actual, 2))
+                st.session_state['input_stop'] = float(round(bajo_14dias, 2))
                 
-                st.toast(f"✅ Datos actualizados para {ticker}", icon="💉")
+                st.toast(f"✅ {ticker}: ${precio_actual:.2f}", icon="💉")
                 
         except Exception as e:
-            st.error("No se encontró el ticker. Verifica que esté bien escrito.")
+            st.error(f"Error: {e}")
 
-# --- FORMULARIO DE DOSIS (Se llena solo o manual) ---
+# --- FORMULARIO DE DOSIS ---
 col1, col2 = st.columns(2)
 
 with col1:
-    # Usamos session_state para pre-llenar el valor
-    entrada = st.number_input("Precio Entrada ($)", value=st.session_state['entrada'], step=0.1, key='input_entrada')
+    # Eliminamos el 'value=' dinámico porque ahora controlamos la key directo
+    # Si la key no existe, inicia en 0.0
+    if 'input_entrada' not in st.session_state: st.session_state['input_entrada'] = 0.0
+    
+    entrada = st.number_input("Precio Entrada ($)", step=0.1, key='input_entrada')
 
 with col2:
-    stop_loss = st.number_input("Stop Loss ($)", value=st.session_state['stop_loss'], step=0.1, help="Sugerido: Mínimo de 14 días", key='input_stop')
-
+    if 'input_stop' not in st.session_state: st.session_state['input_stop'] = 0.0
+    
+    stop_loss = st.number_input("Stop Loss ($)", step=0.1, help="Sugerido: Mínimo de 14 días", key='input_stop')
+    
 # --- CÁLCULOS ---
 riesgo_por_accion = entrada - stop_loss
 es_compra_valida = riesgo_por_accion > 0
