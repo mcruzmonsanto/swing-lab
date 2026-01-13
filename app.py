@@ -47,15 +47,32 @@ def obtener_datos_fundamentales(ticker):
     """Obtiene datos fundamentales de Yahoo Finance (alternativa gratuita a TipRanks)"""
     try:
         stock = yf.Ticker(ticker)
-        info = stock.info
+        
+        # Obtener precio actual desde history (más confiable)
+        hist = stock.history(period="1d")
+        if hist.empty:
+            return None
+        precio_actual = hist['Close'].iloc[-1]
+        
+        # Intentar obtener info (puede fallar)
+        try:
+            info = stock.info
+        except:
+            info = {}
         
         # Recomendaciones de analistas
-        recomendacion = info.get('recommendationKey', 'none')
+        recomendacion = info.get('recommendationKey', 'hold')
         num_analistas = info.get('numberOfAnalystOpinions', 0)
         
         # Precio objetivo
         precio_objetivo = info.get('targetMeanPrice', None)
-        precio_actual = info.get('currentPrice', None)
+        
+        # Si no hay precio objetivo, intentar calcular desde otros datos
+        if not precio_objetivo:
+            target_high = info.get('targetHighPrice', None)
+            target_low = info.get('targetLowPrice', None)
+            if target_high and target_low:
+                precio_objetivo = (target_high + target_low) / 2
         
         # Calcular upside
         upside = None
@@ -67,21 +84,28 @@ def obtener_datos_fundamentales(ticker):
             'strong_buy': 10,
             'buy': 8,
             'hold': 5,
-            'sell': 3,
-            'strong_sell': 1,
-            'none': 5
+            'underperform': 3,
+            'sell': 2,
+            'strong_sell': 1
         }
         smart_score_aprox = score_map.get(recomendacion, 5)
         
         return {
-            'recomendacion': recomendacion.replace('_', ' ').title(),
-            'num_analistas': num_analistas,
+            'recomendacion': recomendacion.replace('_', ' ').title() if recomendacion else 'Hold',
+            'num_analistas': num_analistas if num_analistas else 'N/A',
             'precio_objetivo': round(precio_objetivo, 2) if precio_objetivo else None,
-            'upside': round(upside, 2) if upside else None,
+            'upside': round(upside, 2) if upside else 0,
             'smart_score_aprox': smart_score_aprox
         }
-    except:
-        return None
+    except Exception as e:
+        # Si falla completamente, retornar datos por defecto
+        return {
+            'recomendacion': 'Hold',
+            'num_analistas': 'N/A',
+            'precio_objetivo': None,
+            'upside': 0,
+            'smart_score_aprox': 5
+        }
 
 def crear_grafico_niveles(ticker, precio_actual, entrada, stop_loss, tp1, tp2):
     """Crea gráfico visual con niveles de Stop y Take Profit"""
@@ -279,19 +303,19 @@ with tab1:
             with st.spinner(f"🔎 Analizando {ticker} (Fundamentales + Técnico)..."):
                 stock = yf.Ticker(ticker)
                 
-                # 1. Obtener datos fundamentales (alternativa a TipRanks)
-                datos_fundamentales = obtener_datos_fundamentales(ticker)
-                
-                # 2. Obtener precio actual
+                # 1. Obtener precio actual primero
                 hist_actual = stock.history(period="1d")
                 
                 if hist_actual.empty:
-                    st.error(f"❌ No se encontró el ticker '{ticker}'")
+                    st.error(f"❌ No se encontró el ticker '{ticker}'. Verifica que sea correcto.")
                 else:
                     precio_actual = hist_actual['Close'].iloc[-1]
                     
-                    # 3. Calcular Stop Loss técnico
+                    # 2. Calcular Stop Loss técnico (siempre funciona)
                     stop_calculado, minimo_base, info = calcular_stop_loss_soporte_20d(stock, precio_actual)
+                    
+                    # 3. Obtener datos fundamentales (puede fallar, usamos valores por defecto)
+                    datos_fundamentales = obtener_datos_fundamentales(ticker)
                     
                     if stop_calculado and minimo_base and datos_fundamentales:
                         # Guardar en session state
@@ -322,13 +346,15 @@ with tab1:
                             col_f2.metric("Recomendación", recom)
                         
                         with col_f3:
-                            if datos_fundamentales['upside']:
-                                col_f3.metric("Upside", f"{datos_fundamentales['upside']}%")
+                            upside = datos_fundamentales['upside']
+                            if upside and upside > 0:
+                                col_f3.metric("Upside", f"{upside}%", delta="Positivo")
                             else:
                                 col_f3.metric("Upside", "N/A")
                         
                         with col_f4:
-                            col_f4.metric("Analistas", datos_fundamentales['num_analistas'])
+                            num_analistas = datos_fundamentales['num_analistas']
+                            col_f4.metric("Analistas", num_analistas)
                         
                         # Validación de filtros
                         pasa_filtro = (score >= 8 and 
@@ -338,7 +364,7 @@ with tab1:
                         if pasa_filtro:
                             st.success("✅ **Acción aprobada por filtros fundamentales**")
                         else:
-                            st.warning("⚠️ **La acción NO cumple todos los criterios**")
+                            st.warning("⚠️ **La acción NO cumple todos los criterios** (puedes continuar de todos modos)")
                         
                         st.markdown("---")
                         
@@ -352,9 +378,11 @@ with tab1:
                         st.caption(f"📅 Datos de {info['dias']} días | Mínimo: {info['fecha_minimo']}")
                         
                     else:
-                        st.error(f"❌ Error al obtener datos completos")
+                        st.error(f"❌ Error al calcular el Stop Loss. Verifica el ticker.")
         except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+            st.error(f"❌ Error al analizar {ticker}")
+            st.caption(f"Detalles técnicos: {str(e)}")
+            st.info("💡 **Sugerencias:**\n- Verifica que el ticker sea válido (ej: MSFT, AAPL, GOOGL)\n- Asegúrate de tener conexión a internet\n- Algunos tickers pueden no tener datos completos en Yahoo Finance")
     
     # --- PARÁMETROS Y CÁLCULO ---
     if 'ticker_analizado' in st.session_state:
@@ -471,3 +499,212 @@ Capital: {(inversion/capital)*100:.0f}%""")
                         datos_fund['upside'],
                         datos_fund['recomendacion']
                     )
+                    st.success("✅ Operación guardada")
+                    st.balloons()
+                
+                if riesgo_real <= dinero_en_riesgo * 1.15:
+                    st.success("✅ Operación Aprobada")
+                else:
+                    st.error(f"❌ Riesgo excesivo")
+            
+            elif stop_loss >= entrada:
+                st.error("❌ Stop Loss debe ser menor que entrada")
+            else:
+                st.warning("⚠️ Completa todos los campos")
+    
+    else:
+        st.info("👆 Ingresa un ticker y presiona ANALIZAR TODO")
+
+# ==================== TAB 2: HISTORIAL ====================
+with tab2:
+    st.title("📊 Historial de Operaciones")
+    
+    # Botón de actualización
+    col_ref1, col_ref2 = st.columns([3, 1])
+    with col_ref2:
+        if st.button("🔄 Actualizar Precios", use_container_width=True):
+            with st.spinner("Actualizando..."):
+                actualizar_precios_historial()
+            st.success("✅ Actualizado")
+            st.rerun()
+    
+    if len(st.session_state['historial_operaciones']) == 0:
+        st.info("📭 No hay operaciones registradas")
+    else:
+        metricas = calcular_metricas_performance()
+        
+        # Resumen
+        col_h1, col_h2, col_h3, col_h4 = st.columns(4)
+        col_h1.metric("Total Ops", metricas['total_ops'])
+        col_h2.metric("Activas", metricas['activas'])
+        col_h3.metric("Ganadoras", metricas['ganadoras'], 
+                     delta=f"{metricas['win_rate']}% WR")
+        col_h4.metric("P/L Total", f"${metricas['pl_total']:.2f}")
+        
+        st.markdown("---")
+        
+        # Tabla
+        df_historial = pd.DataFrame(st.session_state['historial_operaciones'])
+        
+        # Colorear P/L
+        def colorear_pl(val):
+            color = 'green' if val > 0 else 'red' if val < 0 else 'gray'
+            return f'color: {color}'
+        
+        styled_df = df_historial.style.applymap(colorear_pl, subset=['pl_actual'])
+        
+        st.dataframe(df_historial[[
+            'fecha', 'ticker', 'acciones', 'entrada', 'precio_actual', 
+            'stop_loss', 'tp_1_2', 'pl_actual', 'status'
+        ]], use_container_width=True, hide_index=True)
+        
+        # Alertas
+        st.markdown("### 🔔 Alertas de Precio")
+        for op in st.session_state['historial_operaciones']:
+            if op['status'] == 'Activa':
+                dist_stop = ((op['precio_actual'] - op['stop_loss']) / op['entrada']) * 100
+                dist_tp = ((op['tp_1_2'] - op['precio_actual']) / op['entrada']) * 100
+                
+                if dist_stop < 2:
+                    st.error(f"🚨 **{op['ticker']}** muy cerca del Stop Loss ({dist_stop:.1f}%)")
+                elif dist_tp < 2:
+                    st.success(f"🎯 **{op['ticker']}** muy cerca del TP 1:2 ({dist_tp:.1f}%)")
+        
+        st.markdown("---")
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            if st.button("🗑️ Limpiar Historial", use_container_width=True):
+                st.session_state['historial_operaciones'] = []
+                st.rerun()
+        
+        with col_btn2:
+            csv = df_historial.to_csv(index=False)
+            st.download_button("📥 Descargar CSV", csv, "historial.csv", 
+                             "text/csv", use_container_width=True)
+
+# ==================== TAB 3: DASHBOARD ====================
+with tab3:
+    st.title("📈 Dashboard de Performance")
+    
+    if len(st.session_state['historial_operaciones']) == 0:
+        st.info("📭 No hay datos para mostrar")
+    else:
+        metricas = calcular_metricas_performance()
+        
+        # Métricas principales
+        col_d1, col_d2, col_d3, col_d4 = st.columns(4)
+        col_d1.metric("Win Rate", f"{metricas['win_rate']}%")
+        col_d2.metric("Profit Factor", metricas['profit_factor'])
+        col_d3.metric("P/L Total", f"${metricas['pl_total']:.2f}")
+        col_d4.metric("Cerradas", f"{metricas['ganadoras']}/{metricas['cerradas']}")
+        
+        st.markdown("---")
+        
+        # Gráfico de P/L acumulado
+        df = pd.DataFrame(st.session_state['historial_operaciones'])
+        df_cerradas = df[df['status'].str.contains('Cerrada')].copy()
+        
+        if not df_cerradas.empty:
+            df_cerradas['pl_acumulado'] = df_cerradas['pl_actual'].cumsum()
+            
+            fig_pl = go.Figure()
+            fig_pl.add_trace(go.Scatter(
+                x=df_cerradas['fecha'],
+                y=df_cerradas['pl_acumulado'],
+                mode='lines+markers',
+                name='P/L Acumulado',
+                line=dict(color='blue', width=3)
+            ))
+            
+            fig_pl.update_layout(
+                title="Curva de P/L Acumulado",
+                xaxis_title="Fecha",
+                yaxis_title="P/L ($)",
+                hovermode='x unified',
+                height=400
+            )
+            
+            st.plotly_chart(fig_pl, use_container_width=True)
+            
+            # Distribución de operaciones
+            st.markdown("### 📊 Distribución de Resultados")
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                # Pie chart
+                fig_pie = go.Figure(data=[go.Pie(
+                    labels=['Ganadoras', 'Perdedoras'],
+                    values=[metricas['ganadoras'], metricas['perdedoras']],
+                    marker=dict(colors=['green', 'red'])
+                )])
+                fig_pie.update_layout(title="Win/Loss Ratio", height=300)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            with col_chart2:
+                # Histograma de P/L
+                fig_hist = go.Figure(data=[go.Histogram(
+                    x=df_cerradas['pl_actual'],
+                    nbinsx=10,
+                    marker=dict(
+                        color=df_cerradas['pl_actual'],
+                        colorscale='RdYlGn',
+                        showscale=False
+                    )
+                )])
+                fig_hist.update_layout(
+                    title="Distribución de P/L",
+                    xaxis_title="P/L ($)",
+                    yaxis_title="Frecuencia",
+                    height=300
+                )
+                st.plotly_chart(fig_hist, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # Top operaciones
+        st.markdown("### 🏆 Top Operaciones")
+        
+        col_top1, col_top2 = st.columns(2)
+        
+        with col_top1:
+            st.markdown("**🟢 Mejores**")
+            if not df_cerradas.empty:
+                top_ganadoras = df_cerradas.nlargest(5, 'pl_actual')[['ticker', 'pl_actual', 'fecha']]
+                st.dataframe(top_ganadoras, hide_index=True, use_container_width=True)
+            else:
+                st.info("No hay operaciones cerradas")
+        
+        with col_top2:
+            st.markdown("**🔴 Peores**")
+            if not df_cerradas.empty:
+                top_perdedoras = df_cerradas.nsmallest(5, 'pl_actual')[['ticker', 'pl_actual', 'fecha']]
+                st.dataframe(top_perdedoras, hide_index=True, use_container_width=True)
+            else:
+                st.info("No hay operaciones cerradas")
+        
+        st.markdown("---")
+        
+        # Análisis por ticker
+        if not df_cerradas.empty:
+            st.markdown("### 📊 Análisis por Ticker")
+            
+            analisis_ticker = df_cerradas.groupby('ticker').agg({
+                'pl_actual': ['sum', 'mean', 'count']
+            }).round(2)
+            
+            analisis_ticker.columns = ['P/L Total', 'P/L Promedio', 'Operaciones']
+            analisis_ticker = analisis_ticker.sort_values('P/L Total', ascending=False)
+            
+            st.dataframe(analisis_ticker, use_container_width=True)
+
+# --- AUTO-REFRESH (si está activado) ---
+if auto_refresh:
+    import time
+    time.sleep(300)  # 5 minutos
+    actualizar_precios_historial()
+    st.rerun()
+
+st.markdown("---")
+st.caption("🩸 Swing Lab v4.0 | Análisis Completo + Dashboard + Auto-actualización")
+st.caption("📊 Datos fundamentales de Yahoo Finance (gratuito) | Gestión profesional de riesgo")
