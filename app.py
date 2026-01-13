@@ -3,141 +3,121 @@ import pandas as pd
 import yfinance as yf
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(
-    page_title="Swing Lab | Dr. Cruz",
-    page_icon="🩸",
-    layout="centered"
-)
+st.set_page_config(page_title="Swing Lab | Dr. Cruz", page_icon="🩸", layout="centered")
 
-# --- ESTILOS CSS (Tu Marca) ---
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            div.stButton > button:first-child {
-                background-color: #D80000;
-                color: white;
-                border-radius: 10px;
-                border: none;
-                font-weight: bold;
-            }
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+# --- ESTILOS CSS ---
+st.markdown("""
+    <style>
+    #MainMenu, footer, header {visibility: hidden;}
+    div.stButton > button:first-child {
+        background-color: #D80000; color: white; border-radius: 10px; border: none; font-weight: bold; width: 100%;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- INICIALIZAR ESTADO (Para que los datos no se borren) ---
-if 'entrada' not in st.session_state:
-    st.session_state['entrada'] = 0.0
-if 'stop_loss' not in st.session_state:
-    st.session_state['stop_loss'] = 0.0
-
-# --- TÍTULO ---
-st.title("🩸 Swing Lab Calculator v2.0")
-st.markdown("---")
-
-# --- BARRA LATERAL ---
+# --- BARRA LATERAL (CONFIGURACIÓN GLOBAL) ---
 with st.sidebar:
     st.header("⚙️ Configuración")
+    
+    # 1. Capital Total
     capital = st.number_input("Capital Total ($)", value=1000.0, step=100.0)
-    riesgo_pct = st.slider("Riesgo Máximo (%)", 0.5, 5.0, 2.0, 0.1)
+    
+    # 2. Riesgo (Cuánto perder si sale mal)
+    riesgo_pct = st.slider("Riesgo Máximo por Trade (%)", 0.5, 5.0, 2.0, 0.1)
     dinero_en_riesgo = capital * (riesgo_pct / 100)
-    st.info(f"🛡️ Cinturón de Seguridad: **${dinero_en_riesgo:.2f}**")
+    
+    st.markdown("---")
+    
+    # 3. DIVERSIFICACIÓN (NUEVO)
+    st.header("🍰 Diversificación")
+    max_alloc_pct = st.slider("Tamaño Máximo de Posición (%)", 10, 100, 25, 5, 
+                             help="Nunca invertir más de este % del capital en una sola acción.")
+    
+    max_inversion_permitida = capital * (max_alloc_pct / 100)
+    st.info(f"💰 Tope de Inversión: **${max_inversion_permitida:.0f}**\n(Para tener espacio para otras ~{int(100/max_alloc_pct)} operaciones)")
 
-# --- SECCIÓN DE BÚSQUEDA AUTOMÁTICA ---
+# --- TÍTULO ---
+st.title("🩸 Swing Lab Calculator v3.0")
+st.caption("Gestión de Riesgo + Diversificación Inteligente")
+
+# --- BÚSQUEDA AUTOMÁTICA ---
 col_search, col_btn = st.columns([3, 1])
 with col_search:
-    ticker = st.text_input("Ticker (Símbolo)", value="MSFT").upper()
+    ticker = st.text_input("Ticker", value="MSFT").upper()
 with col_btn:
-    st.write("") # Espacio para alinear
     st.write("") 
+    st.write("")
     if st.button("🔍 Analizar"):
         try:
-            with st.spinner(f"Tomando signos vitales de {ticker}..."):
-                # 1. Descargar datos
+            with st.spinner("Consultando..."):
                 stock = yf.Ticker(ticker)
                 hist = stock.history(period="1mo")
-                
-                # 2. Obtener valores
                 precio_actual = hist['Close'].iloc[-1]
                 bajo_14dias = hist['Low'].tail(14).min()
                 
-                # 3. ACTUALIZACIÓN FORZADA DE LOS CAMPOS (EL FIX)
-                # Escribimos directo en la 'key' del widget
+                # Actualizar estados
                 st.session_state['input_entrada'] = float(round(precio_actual, 2))
                 st.session_state['input_stop'] = float(round(bajo_14dias, 2))
-                
-                st.toast(f"✅ {ticker}: ${precio_actual:.2f}", icon="💉")
-                
-        except Exception as e:
-            st.error(f"Error: {e}")
+                st.toast(f"Precio actualizado: ${precio_actual}", icon="✅")
+        except:
+            st.error("Error al buscar ticker.")
 
-# --- FORMULARIO DE DOSIS ---
+# --- FORMULARIO ---
 col1, col2 = st.columns(2)
-
 with col1:
-    # Eliminamos el 'value=' dinámico porque ahora controlamos la key directo
-    # Si la key no existe, inicia en 0.0
     if 'input_entrada' not in st.session_state: st.session_state['input_entrada'] = 0.0
-    
     entrada = st.number_input("Precio Entrada ($)", step=0.1, key='input_entrada')
-
 with col2:
     if 'input_stop' not in st.session_state: st.session_state['input_stop'] = 0.0
-    
-    stop_loss = st.number_input("Stop Loss ($)", step=0.1, help="Sugerido: Mínimo de 14 días", key='input_stop')
-    
-# --- CÁLCULOS Y LÓGICA DE BILLETERA ---
-st.markdown("<br>", unsafe_allow_html=True) 
+    stop_loss = st.number_input("Stop Loss ($)", step=0.1, key='input_stop')
 
-if st.button("CALCULAR DOSIS 💊", use_container_width=True):
+# --- CÁLCULO MAESTRO ---
+st.markdown("<br>", unsafe_allow_html=True)
+
+if st.button("CALCULAR DOSIS 💊"):
     riesgo_por_accion = entrada - stop_loss
     
-    # Validaciones previas
-    if entrada == 0 or stop_loss == 0:
-        st.warning("⚠️ Por favor usa el botón 'Analizar' o ingresa precios.")
+    if entrada <= 0 or stop_loss <= 0:
+        st.warning("⚠️ Faltan precios.")
     elif stop_loss >= entrada:
-        st.error("⚠️ El Stop Loss debe ser MENOR que la entrada.")
+        st.error("⚠️ El Stop Loss debe ser MENOR a la entrada.")
     else:
-        # 1. Cálculo Ideal (Basado en Riesgo)
-        acciones_teoricas = dinero_en_riesgo / riesgo_por_accion
+        # 1. Límite por RIESGO (La Regla de los $20)
+        # ¿Cuántas acciones puedo comprar para que, si pierdo, solo pierda $20?
+        acciones_riesgo = dinero_en_riesgo / riesgo_por_accion
         
-        # 2. Cálculo Real (Basado en tu Billetera)
-        acciones_max_billetera = capital / entrada
+        # 2. Límite por DIVERSIFICACIÓN (La Regla del Tope)
+        # ¿Cuántas acciones caben en mi presupuesto máximo (ej. $250)?
+        acciones_presupuesto = max_inversion_permitida / entrada
         
-        # 3. La decisión (Tomamos el menor de los dos)
-        if acciones_teoricas > acciones_max_billetera:
-            acciones_finales = acciones_max_billetera
-            limitado_por_capital = True
-        else:
-            acciones_finales = acciones_teoricas
-            limitado_por_capital = False
-            
-        # 4. Resultados Finales
-        inversion_total = acciones_finales * entrada
-        riesgo_real_asumido = acciones_finales * riesgo_por_accion
+        # 3. DECISIÓN FINAL: Elegimos el menor de los dos límites
+        acciones_finales = min(acciones_riesgo, acciones_presupuesto)
+        
+        # Cálculos resultantes
+        inversion_real = acciones_finales * entrada
+        riesgo_real = acciones_finales * riesgo_por_accion
         take_profit = entrada + (riesgo_por_accion * 2)
-
-        # --- VISUALIZACIÓN ---
-        if limitado_por_capital:
-            st.warning(f"⚠️ Ajuste automático: Tu riesgo ideal requiere ${acciones_teoricas * entrada:.0f}, pero solo tienes ${capital:.0f}. Se ajustó la dosis a tu máximo capital.")
         
-        st.success(f"✅ Dosis Calculada para: {ticker}")
+        # --- REPORTE VISUAL ---
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Comprar (Acciones)", f"{acciones_finales:.4f}")
-        c2.metric("Inversión Total", f"${inversion_total:.2f}")
+        # Determinamos qué limitó la operación para explicárselo al usuario
+        motivo_limite = "Riesgo ($20)"
+        if acciones_presupuesto < acciones_riesgo:
+            motivo_limite = "Diversificación (Presupuesto)"
+            st.warning(f"⚠️ **Nota:** Tu riesgo permite comprar más, pero limitamos la compra a **${max_inversion_permitida:.0f}** para no concentrar todo tu capital en una sola acción.")
         
-        # Mostramos el riesgo real (que puede ser menor a $20 si te faltó dinero)
-        c3.metric("Riesgo Real", f"${riesgo_real_asumido:.2f}", 
-                 delta=f"{riesgo_real_asumido - dinero_en_riesgo:.2f} vs Objetivo" if limitado_por_capital else None)
+        st.success(f"✅ Dosis Recetada para: {ticker}")
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Cantidad (Acciones)", f"{acciones_finales:.4f}")
+        m2.metric("Inversión Total", f"${inversion_real:.2f}")
+        m3.metric("Riesgo Asumido", f"${riesgo_real:.2f}", delta=f"Límite: {motivo_limite}", delta_color="off")
         
         st.markdown("---")
         st.subheader("📋 Plan de Salida")
-        
         datos = {
             "Escenario": ["🔴 Stop Loss", "🟢 Take Profit (2:1)"],
-            "Precio": [f"${stop_loss:.2f}", f"${take_profit:.2f}"],
-            "Resultado P/L": [f"-${riesgo_real_asumido:.2f}", f"+${riesgo_real_asumido * 2:.2f}"]
+            "Precio Objetivo": [f"${stop_loss:.2f}", f"${take_profit:.2f}"],
+            "Resultado P/L": [f"-${riesgo_real:.2f}", f"+${riesgo_real * 2:.2f}"]
         }
         st.table(pd.DataFrame(datos))
