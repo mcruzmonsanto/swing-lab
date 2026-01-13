@@ -87,36 +87,57 @@ with col2:
     
     stop_loss = st.number_input("Stop Loss ($)", step=0.1, help="Sugerido: Mínimo de 14 días", key='input_stop')
     
-# --- CÁLCULOS ---
-riesgo_por_accion = entrada - stop_loss
-es_compra_valida = riesgo_por_accion > 0
-
-st.markdown("<br>", unsafe_allow_html=True) # Espacio
+# --- CÁLCULOS Y LÓGICA DE BILLETERA ---
+st.markdown("<br>", unsafe_allow_html=True) 
 
 if st.button("CALCULAR DOSIS 💊", use_container_width=True):
+    riesgo_por_accion = entrada - stop_loss
+    
+    # Validaciones previas
     if entrada == 0 or stop_loss == 0:
-        st.warning("⚠️ Por favor ingresa los precios o usa el botón 'Analizar'.")
-    elif not es_compra_valida:
+        st.warning("⚠️ Por favor usa el botón 'Analizar' o ingresa precios.")
+    elif stop_loss >= entrada:
         st.error("⚠️ El Stop Loss debe ser MENOR que la entrada.")
     else:
-        # Fórmulas
-        acciones = dinero_en_riesgo / riesgo_por_accion
-        inversion_total = acciones * entrada
-        take_profit = entrada + (riesgo_por_accion * 2)
+        # 1. Cálculo Ideal (Basado en Riesgo)
+        acciones_teoricas = dinero_en_riesgo / riesgo_por_accion
         
-        # Resultados
-        st.success(f"✅ Dosis calculada para: {ticker}")
+        # 2. Cálculo Real (Basado en tu Billetera)
+        acciones_max_billetera = capital / entrada
+        
+        # 3. La decisión (Tomamos el menor de los dos)
+        if acciones_teoricas > acciones_max_billetera:
+            acciones_finales = acciones_max_billetera
+            limitado_por_capital = True
+        else:
+            acciones_finales = acciones_teoricas
+            limitado_por_capital = False
+            
+        # 4. Resultados Finales
+        inversion_total = acciones_finales * entrada
+        riesgo_real_asumido = acciones_finales * riesgo_por_accion
+        take_profit = entrada + (riesgo_por_accion * 2)
+
+        # --- VISUALIZACIÓN ---
+        if limitado_por_capital:
+            st.warning(f"⚠️ Ajuste automático: Tu riesgo ideal requiere ${acciones_teoricas * entrada:.0f}, pero solo tienes ${capital:.0f}. Se ajustó la dosis a tu máximo capital.")
+        
+        st.success(f"✅ Dosis Calculada para: {ticker}")
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Comprar (Acciones)", f"{acciones:.4f}")
+        c1.metric("Comprar (Acciones)", f"{acciones_finales:.4f}")
         c2.metric("Inversión Total", f"${inversion_total:.2f}")
-        c3.metric("Riesgo Real", f"${dinero_en_riesgo:.2f}")
         
-        # Tabla Plan
+        # Mostramos el riesgo real (que puede ser menor a $20 si te faltó dinero)
+        c3.metric("Riesgo Real", f"${riesgo_real_asumido:.2f}", 
+                 delta=f"{riesgo_real_asumido - dinero_en_riesgo:.2f} vs Objetivo" if limitado_por_capital else None)
+        
+        st.markdown("---")
         st.subheader("📋 Plan de Salida")
+        
         datos = {
             "Escenario": ["🔴 Stop Loss", "🟢 Take Profit (2:1)"],
             "Precio": [f"${stop_loss:.2f}", f"${take_profit:.2f}"],
-            "Resultado": [f"-${dinero_en_riesgo:.2f}", f"+${dinero_en_riesgo*2:.2f}"]
+            "Resultado P/L": [f"-${riesgo_real_asumido:.2f}", f"+${riesgo_real_asumido * 2:.2f}"]
         }
         st.table(pd.DataFrame(datos))
