@@ -1,0 +1,22 @@
+{
+  "capital_inicial": 1000.0,
+  "capital_actual": 803.4796404019037,
+  "trades": [
+    {
+      "fecha": "2026-01-14 07:00",
+      "ticker": "NVDA",
+      "acciones": 1.06,
+      "entrada": 185.81,
+      "stop_loss": 166.9,
+      "tp_1_2": 223.63,
+      "tp_1_3": 242.54,
+      "inversion": 196.52,
+      "status": "Activa",
+      "precio_actual": 185.81,
+      "pl_actual": 0.0,
+      "smart_score": 8,
+      "upside": 42.60265862978312,
+      "consensus": "Strong Buy"
+    }
+  ]
+}
